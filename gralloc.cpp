@@ -93,6 +93,27 @@ static int drm_mod_perform(const struct gralloc_module_t *mod, int op, ...)
 			err = 0;
 		}
 		break;
+	case static_cast<int>(GRALLOC_MODULE_PERFORM_DRM_IMPORT):
+		{
+			int fd = va_arg(args, int);
+			buffer_handle_t handle = va_arg(args, buffer_handle_t);
+			hwc_drm_bo_t *hwc_bo = va_arg(args, hwc_drm_bo_t *);
+
+			gralloc_drm_handle_t *gr_handle = gralloc_drm_handle(handle);
+
+			if (!gr_handle) {
+				ALOGE("could not find gralloc drm handle");
+				err = -EINVAL;
+				break;
+			}
+
+			/* call driver to resolve hwc_drm_bo_t */
+			if (dmod->drm->drv->resolve_buffer)
+				err = dmod->drm->drv->resolve_buffer(dmod->drm->drv, fd, gr_handle, hwc_bo);
+			else
+				err = -EINVAL;
+		}
+		break;
 	default:
 		err = -EINVAL;
 		break;

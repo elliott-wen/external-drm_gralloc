@@ -28,6 +28,7 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
+#include "drmhwcgralloc.h"
 #include "gralloc_drm_handle.h"
 
 #ifdef __cplusplus
@@ -72,6 +73,12 @@ struct gralloc_drm_drv_t {
 	void (*resolve_format)(struct gralloc_drm_drv_t *drv,
 		     struct gralloc_drm_bo_t *bo,
 		     uint32_t *pitches, uint32_t *offsets, uint32_t *handles);
+
+	/* resolve hwc_drm_bo_t from given gralloc_drm_handle_t */
+	int (*resolve_buffer)(struct gralloc_drm_drv_t *drv,
+			int fd,
+			struct gralloc_drm_handle_t *handle,
+			hwc_drm_bo_t *hwc_bo);
 };
 
 struct gralloc_drm_bo_t {

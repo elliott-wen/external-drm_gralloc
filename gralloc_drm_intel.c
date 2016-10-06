@@ -64,14 +64,13 @@ struct intel_buffer {
 	uint32_t tiling;
 };
 
-static void calculate_aligned_geometry(uint32_t hal_format, int usage,
+static void calculate_aligned_geometry(uint32_t fourcc_format, int usage,
 		uint32_t cursor_width,
 		uint32_t cursor_height,
 		uint32_t *width,
 		uint32_t *height)
 {
 	uint32_t width_alignment = 1, height_alignment = 1, extra_height_div = 0;
-	uint32_t fourcc_format = get_fourcc_format_for_hal_format(hal_format);
 	switch(fourcc_format) {
 	case DRM_FORMAT_YUV420:
 		width_alignment = 32;
@@ -114,17 +113,13 @@ static void calculate_aligned_geometry(uint32_t hal_format, int usage,
 		*width = ALIGN(*width, 128);
 }
 
-static void calculate_aligned_offsets(struct gralloc_drm_bo_t *bo,
+static void calculate_offsets(struct gralloc_drm_bo_t *bo,
+		uint32_t fourcc_format,
 		uint32_t height,
 		uint32_t *pitches,
 		uint32_t *offsets,
 		uint32_t *handles)
 {
-	/*
-	 * TODO - should take account hw specific padding, alignment
-	 * for camera, video decoder etc.
-	 */
-
 	struct intel_buffer *ib = (struct intel_buffer *) bo;
 
 	memset(pitches, 0, 4 * sizeof(uint32_t));
@@ -134,9 +129,8 @@ static void calculate_aligned_offsets(struct gralloc_drm_bo_t *bo,
 	pitches[0] = ib->base.handle->stride;
 	handles[0] = ib->base.fb_handle;
 
-	switch(ib->base.handle->format) {
-		case HAL_PIXEL_FORMAT_YV12:
-
+	switch(fourcc_format) {
+		case DRM_FORMAT_YUV420:
 			// U and V stride are half of Y plane
 			pitches[2] = ALIGN(pitches[0] / 2, 16);
 			pitches[1] = ALIGN(pitches[0] / 2, 16);
@@ -156,15 +150,47 @@ static void intel_resolve_format(struct gralloc_drm_drv_t *drv,
 		struct gralloc_drm_bo_t *bo,
 		uint32_t *pitches, uint32_t *offsets, uint32_t *handles)
 {
-    struct intel_info *info = (struct intel_info *) drv;
-    uint32_t aligned_width = bo->handle->width;
-    uint32_t aligned_height = bo->handle->height;
-    calculate_aligned_geometry(bo->handle->format, bo->handle->usage,
-			       info->cursor_width, info->cursor_height,
-			       &aligned_width, &aligned_height);
+	uint32_t fourcc_format = get_fourcc_format_for_hal_format(bo->handle->format);
+	calculate_offsets(bo, fourcc_format, bo->handle->height,
+			pitches, offsets, handles);
+}
 
-    calculate_aligned_offsets(bo, aligned_height,
-			      pitches, offsets, handles);
+static int intel_resolve_buffer(struct gralloc_drm_drv_t *drv,
+                               int fd,
+                               struct gralloc_drm_handle_t *handle,
+                               hwc_drm_bo_t *hwc_bo)
+{
+	struct intel_buffer *ib = (struct intel_buffer *) handle->data;
+	uint32_t aligned_width = handle->width;
+	uint32_t aligned_height = handle->height;
+	struct intel_info *info = (struct intel_info *) drv;
+	memset(hwc_bo, 0, sizeof(hwc_drm_bo_t));
+
+	int err = drmPrimeFDToHandle(fd, handle->prime_fd, &ib->base.fb_handle);
+	if (err) {
+		ALOGE("failed to import prime fd %d ret=%s",
+			handle->prime_fd, strerror(-err));
+		return err;
+	}
+
+	hwc_bo->format = get_fourcc_format_for_hal_format(handle->format);
+	// We support DRM_FORMAT_ARGB8888 for cursor.
+	if (handle->usage & GRALLOC_USAGE_CURSOR)
+		hwc_bo->format = DRM_FORMAT_ARGB8888;
+
+	hwc_bo->fb_id = 0;
+
+	calculate_aligned_geometry(hwc_bo->format, handle->usage,
+				info->cursor_width, info->cursor_height,
+				&aligned_width, &aligned_height);
+
+	calculate_offsets(handle->data, hwc_bo->format, handle->height,
+			hwc_bo->pitches, hwc_bo->offsets, hwc_bo->gem_handles);
+
+	hwc_bo->width = aligned_width;
+	hwc_bo->height = aligned_height;
+
+	return 0;
 }
 
 static drm_intel_bo *alloc_ibo(struct intel_info *info,
@@ -173,7 +199,7 @@ static drm_intel_bo *alloc_ibo(struct intel_info *info,
 {
 	drm_intel_bo *ibo;
 	const char *name;
-	uint32_t aligned_width, aligned_height, bpp;
+	uint32_t aligned_width, aligned_height, bpp, fourcc_format;
 	unsigned long flags;
 
 	flags = 0;
@@ -185,7 +211,8 @@ static drm_intel_bo *alloc_ibo(struct intel_info *info,
 
 	aligned_width = handle->width;
 	aligned_height = handle->height;
-	calculate_aligned_geometry(handle->format, handle->usage,
+	fourcc_format = get_fourcc_format_for_hal_format(handle->format);
+	calculate_aligned_geometry(fourcc_format, handle->usage,
 				   info->cursor_width, info->cursor_height,
 				   &aligned_width, &aligned_height);
 	if (handle->usage & GRALLOC_USAGE_HW_FB || handle->usage & GRALLOC_USAGE_CURSOR) {
@@ -449,6 +476,7 @@ struct gralloc_drm_drv_t *gralloc_drm_drv_create_for_intel(int fd)
 	info->base.map = intel_map;
 	info->base.unmap = intel_unmap;
 	info->base.resolve_format = intel_resolve_format;
+	info->base.resolve_buffer = intel_resolve_buffer;
 
 	return &info->base;
 }

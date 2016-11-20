@@ -151,14 +151,9 @@ int gralloc_drm_get_fd(struct gralloc_drm_t *drm)
 /*
  * Validate a buffer handle and return the associated bo.
  */
-static struct gralloc_drm_bo_t *validate_handle(buffer_handle_t _handle,
+static struct gralloc_drm_bo_t *validate_handle(struct gralloc_drm_handle_t *handle,
 		struct gralloc_drm_t *drm)
 {
-	struct gralloc_drm_handle_t *handle = gralloc_drm_handle(_handle);
-
-	if (!handle)
-		return NULL;
-
 	/* the buffer handle is passed to a new process */
 	if (unlikely(handle->data_owner != gralloc_drm_get_pid())) {
 		struct gralloc_drm_bo_t *bo;
@@ -192,24 +187,28 @@ static struct gralloc_drm_bo_t *validate_handle(buffer_handle_t _handle,
 /*
  * Register a buffer handle.
  */
-int gralloc_drm_handle_register(buffer_handle_t handle, struct gralloc_drm_t *drm)
+int gralloc_drm_handle_register(buffer_handle_t _handle, struct gralloc_drm_t *drm)
 {
-	return (validate_handle(handle, drm)) ? 0 : -EINVAL;
+	struct gralloc_drm_handle_t *handle = gralloc_drm_handle(_handle);
+
+	if (!handle)
+		return -EINVAL;
+
+	return validate_handle(handle, drm) ? 0 : -EINVAL;
 }
 
 /*
  * Unregister a buffer handle.  It is no-op for handles created locally.
  */
-int gralloc_drm_handle_unregister(buffer_handle_t handle)
+int gralloc_drm_handle_unregister(buffer_handle_t _handle)
 {
-	struct gralloc_drm_bo_t *bo;
+	struct gralloc_drm_handle_t *handle = gralloc_drm_handle(_handle);
 
-	bo = validate_handle(handle, NULL);
-	if (!bo)
+	if (!handle || !handle->data)
 		return -EINVAL;
 
-	if (bo->imported)
-		gralloc_drm_bo_decref(bo);
+	if (handle->data->imported)
+		gralloc_drm_bo_decref(handle->data);
 
 	return 0;
 }
@@ -236,6 +235,7 @@ static struct gralloc_drm_handle_t *create_bo_handle(int width,
 	handle->format = format;
 	handle->usage = usage;
 	handle->prime_fd = -1;
+	handle->data = 0;
 
 	return handle;
 }
@@ -308,9 +308,14 @@ void gralloc_drm_bo_decref(struct gralloc_drm_bo_t *bo)
 /*
  * Return the bo of a registered handle.
  */
-struct gralloc_drm_bo_t *gralloc_drm_bo_from_handle(buffer_handle_t handle)
+struct gralloc_drm_bo_t *gralloc_drm_bo_from_handle(buffer_handle_t _handle)
 {
-	return validate_handle(handle, NULL);
+	struct gralloc_drm_handle_t *handle = gralloc_drm_handle(_handle);
+
+	if (!handle)
+		return NULL;
+
+	return handle->data;
 }
 
 /*
